@@ -4,7 +4,7 @@
 #'
 #' @name irace-package
 #' @docType package
-#' @import stats utils compiler
+#' @import stats utils compiler entropy
 #' @importFrom R6 R6Class
 #' @importFrom grDevices dev.new dev.off pdf cairo_pdf rgb
 #' @importFrom graphics abline axis barplot boxplot hist lines matplot mtext par plot points strwidth text bxp grid

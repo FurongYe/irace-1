@@ -477,6 +477,255 @@ merge.matrix <- function(x, y)
   return(x)
 }
 
+
+
+## diversity
+diversityRI <- function(valueParam, listParam, rangeParam) {
+  lenParam <- length(listParam)
+  if(lenParam <= 2) {
+    return  (rangeParam ^ 2)
+  }
+  minParam <- min(listParam)
+  if(minParam < 0) {
+    valueParam <- valueParam - minParam
+    listParam <- listParam - minParam
+  }
+  if (valueParam == listParam[1] | valueParam == listParam[lenParam]) {
+    if (valueParam != listParam[2] & valueParam != listParam[lenParam - 1]) {
+      return (rangeParam ^ 2)
+    } else {
+      return (0)
+    }
+  }
+  for (i in (seq_len(length(listParam-2)) + 1)) {
+    if (listParam[i] == valueParam) {
+      result <- (valueParam - listParam[i-1]) * (listParam[i+1] - valueParam)
+      return (result)
+    }
+  }
+}
+
+diversityC <- function(valueParam, listParam) {
+  t <- table(listParam)
+  return (1 - t[names=valueParam] / length(listParam))
+}
+
+## diversity
+heuristicSelect <- function(configurations,parameters,nbElites)
+{
+  nbConfigurations <- nrow(configurations)
+  nbParameters <- length(parameters$names)
+  diversityValues <-
+    as.data.frame(matrix(nrow = nbConfigurations,
+                         ncol = nbParameters,
+                         dimnames = list(NULL, c(parameters$names)))
+    )
+  
+  sortedConfigurations <- configurations
+  for (currentParameter in parameters$names) {
+    type <- parameters$types[[currentParameter]]
+    if (type %in% c("i","r")) {
+      sortedConfigurations[[currentParameter]] <- sort(sortedConfigurations[[currentParameter]],na.last = TRUE)
+    }
+  }
+  for (currentParameter in parameters$names) {
+    type <- parameters$types[[currentParameter]]
+    for (i in seq_len(nbConfigurations)) {
+      if (type == "c" | type == "o") {
+        diversityValues[[currentParameter]][i] <- diversityC(sortedConfigurations[[currentParameter]][i],sortedConfigurations[[currentParameter]])
+      } else if (type %in% c("i","r")) {
+        sortedConfigurations[[currentParameter]][is.na(sortedConfigurations[[currentParameter]])] <- paramUpperBound(currentParameter,parameters)
+        rangeParam <- paramUpperBound(currentParameter,parameters)-paramLowerBound(currentParameter,parameters)
+        diversityValues[[currentParameter]][i] <- diversityRI(sortedConfigurations[[currentParameter]][i],sortedConfigurations[[currentParameter]],rangeParam)
+      } 
+    }
+  }
+  
+  for (currentParameter in parameters$names) {
+    diversityValues[[currentParameter]] <- rank(-diversityValues[[currentParameter]])
+  }
+  
+  selectrow <- c(1)
+  maxrank <- nbConfigurations + 1
+  while (length(selectrow) < nbElites) {
+    tempindex <- c()
+    for (currentParameter in parameters$names) {
+      tempselect <- sample(which(diversityValues[[currentParameter]] == min(diversityValues[[currentParameter]])),size=1)
+      tempindex <- append(tempindex,tempselect)
+      diversityValues[[currentParameter]][tempselect] <- maxrank
+    }
+    
+    if(length(unique(append(selectrow,tempindex))) <= nbElites) {
+      selectrow <- unique(append(selectrow,tempindex))
+    } else {
+      tempindex<- tempindex[!(tempindex %in% selectrow)]
+      while(length(selectrow) < nbElites & length(tempindex) > 0) {
+        tempselect <- sample(tempindex,size=1)
+        tempindex <- tempindex[tempindex!=tempselect]
+        selectrow <- append(selectrow,tempselect)
+      }
+    }
+  }
+  
+  elites <- configurations[selectrow, , drop = FALSE]
+  return (elites)
+}
+
+iEntropy <- function(listParam, lowerbound, upperbound) {
+  bins <- seq(lowerbound,upperbound)
+  vCounts <- c()
+  for (i in bins) {
+    vCounts <- append(vCounts, length(listParam[listParam == i]))
+  }
+  if(sum(vCounts) == 0) {return (0)}
+  return (entropy(vCounts,method = "ML",unit="log")/log(length(vCounts)))
+}
+
+oEntropy <- function(listParam, bins) {
+  vCounts <- c()
+  for (i in bins) {
+    vCounts <- append(vCounts, length(listParam[listParam == i]))
+  }
+  if(sum(vCounts) == 0) {return (0)}
+  return (entropy(vCounts,method = "ML",unit="log")/log(length(vCounts)))
+}
+
+rEntropy <- function(listParam, lowerbound, upperbound) {
+  vCounts <- discretize(listParam, length(listParam), range(lowerbound, upperbound))
+  if(sum(vCounts) == 0) {return (0)}
+  return (entropy(vCounts,method = "ML",unit="log")/log(length(vCounts)))
+}
+
+
+configurationEntropy <- function(configurations,parameters) {
+  entropyvalue <- 0
+  nbConfigurations <- nrow(configurations)
+  nbParameters <- length(parameters$names)
+  for (currentParameter in parameters$names) {
+    type <- parameters$types[[currentParameter]]
+    for (i in seq_len(nbConfigurations)) {
+      if (type == "c" | type == "o") {
+        entropyvalue = entropyvalue + oEntropy(configurations[[currentParameter]],parameters$domain[[currentParameter]])
+      } else if (type == "i") {
+        entropyvalue = entropyvalue + iEntropy(configurations[[currentParameter]],parameters$domain[[currentParameter]][1],parameters$domain[[currentParameter]][2])
+      } else if (type == "r") {
+        entropyvalue = entropyvalue + rEntropy(configurations[[currentParameter]],parameters$domain[[currentParameter]][1],parameters$domain[[currentParameter]][2])
+      } 
+    }
+  }
+  return (entropyvalue / nbParameters)
+}
+
+
+maxEntropySelect <- function(configurations,parameters,nbElites) {
+  if (nrow(configurations) > nbElites) {
+    enum_set<-combinations(nrow(configurations)-1,nrow(configurations)-nbElites,seq(2,nrow(configurations)))
+    maxEntropy <- -1
+    for (i in seq(1,nrow(enum_set))) {
+      En <- configurationEntropy(configurations[-enum_set[i,], , drop = FALSE], parameters)
+      if (En > maxEntropy) {
+        maxEntropy <- En
+        delCol <- enum_set[i,]
+      }
+    }
+    configurations <- configurations[-c(delCol), , drop = FALSE]
+    configurations[, ".WEIGHT."] <- ((nbElites - (1:nbElites) + 1)
+                                     / (nbElites * (nbElites + 1) / 2))
+  }
+  return (configurations)
+}
+
+
+randomHalfSelect <- function(configurations,parameters,nbElites) {
+  if (nrow(configurations) > nbElites) {
+      delCols <- sample(seq(2,nrow(configurations)),nrow(configurations)-nbElites, replace = FALSE, prob = NULL)
+      configurations <- configurations[-c(delCols), , drop = FALSE]
+      configurations[, ".WEIGHT."] <- ((nbElites - (1:nbElites) + 1)
+                                     / (nbElites * (nbElites + 1) / 2))
+  }
+  return (configurations)
+}
+
+getMeanConfiguration <- function(configurations,parameters) {
+  namesParameters <- names(parameters$conditions)
+  MeanConfiguration <- new.empty.configuration(parameters)
+  for (p in seq_along(namesParameters)) {
+    currentParameter <- namesParameters[p]
+    if (!conditionsSatisfied(parameters, MeanConfiguration, currentParameter)) {
+      MeanConfiguration[[p]] <- NA
+      next
+    }
+    # FIXME: We must be careful because parameters$types does not have the
+    # same order as namesParameters, because we sample in the order of the
+    # conditions.
+    currentType <- parameters$types[[currentParameter]]
+    if (isFixed(currentParameter, parameters)) {
+      # We don't even need to sample, there is only one possible value !
+      newVal <- get.fixed.value (currentParameter, parameters)
+      # The parameter is not a fixed and should be sampled          
+    } else if (currentType %in% c("i", "r")) {
+      newVal <- mean(configurations[[currentParameter]])
+    } else {
+      irace.assert(currentType %in% c("c","o"))
+      possibleValues <- unique(configurations[[currentParameter]])
+      maxCount <- 0
+      for (i in possibleValues) {
+        ct<- length(configurations[[currentParameter]][configurations[[currentParameter]] == i])
+        if (ct > maxCount) {
+          maxCount <- ct
+          newVal <- i
+        }
+      }
+    }
+    MeanConfiguration[[p]] <- newVal
+  }
+  MeanConfiguration <- as.data.frame(MeanConfiguration, stringsAsFactors=FALSE)
+  return (MeanConfiguration)
+}
+
+gowerDistSelect <- function(configurations,parameters,nbElites) {
+  
+  if (nrow(configurations) > nbElites) {
+    candidateCol<-c(2:nrow(configurations))
+    selectedCol<-c(1)
+    
+    while(length(selectedCol) < nbElites) {
+      meanConfiguration<-getMeanConfiguration(configurations[selectedCol, ,drop=FALSE],parameters)
+      ### Compare gower dis.
+      maxDis <- -1
+      for (i in candidateCol) {
+        sumDelta <- 0
+        sumD <- 0
+        for (currentParameter in parameters$names) {
+          if(is.na(configurations[[currentParameter]][i]) | is.na(meanConfiguration[[currentParameter]][1])) {
+            next
+          }
+          sumD <- sumD + 1
+          currentType <- parameters$types[[currentParameter]]
+          if (currentType %in% c("c", "o")) {
+            if(configurations[[currentParameter]][i] != meanConfiguration[[currentParameter]][1]) {
+              sumDelta <- sumDelta + 1
+            }
+          } else if (currentType %in% c("i", "r")) {
+            sumDelta <- sumDelta + (abs(configurations[[currentParameter]][i] - meanConfiguration[[currentParameter]][1]) / abs(parameters$domain[[currentParameter]][1]-parameters$domain[[currentParameter]][2]))
+          } 
+        }
+        tDis <- sumDelta / sumD
+        if (tDis > maxDis) {
+          maxDis <- tDis
+          sCol <- i
+        }
+      }
+      selectedCol<-append(selectedCol,i)
+      candidateCol<-candidateCol[candidateCol != i]
+    }
+    configurations <- configurations[selectedCol, , drop = FALSE]
+    configurations[, ".WEIGHT."] <- ((nbElites - (1:nbElites) + 1)
+                                     / (nbElites * (nbElites + 1) / 2))
+  }
+  return (configurations)
+}
+
 ## extractElites
 # Input: the configurations with the .RANK. field filled.
 #        the number of elites wished

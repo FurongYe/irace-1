@@ -17,7 +17,7 @@ Authors@R: c(person("Manuel", "López-Ibáñez", role = c("aut", "cre"),
              person("Prasanna", "Balaprakash", role = "ctb"),
              person("Nguyen", "Dang", role = "ctb", email = "nttd@st-andrews.ac.uk"))
 Depends: R (>= 3.2.0)
-Imports: stats, utils, compiler, R6
+Imports: stats, utils, compiler, entropy, R6, gtools
 Suggests: Rmpi (>= 0.6.0), parallel, knitr, testthat, withr, mlr (>=
         2.15.0), ParamHelpers, devtools, rhub
 VignetteBuilder: knitr
